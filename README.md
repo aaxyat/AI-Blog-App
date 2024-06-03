@@ -4,7 +4,7 @@ Welcome to AI Blog App, a Django-based web application that leverages the power 
 
 ## Screenshot 📸
 
-![AI Blog App Screenshot](./screenshot.png)
+![AI Blog App Screenshot](./Screenshot.png)
 
 ## Getting Started 🏁
 
