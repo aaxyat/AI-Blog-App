@@ -77,20 +77,17 @@ def generate_blog(request):
     else:
         return(JsonResponse({'error': 'Invalid Request'}, status=405))
     
-    # TODO: Get The Title Of The Video
+    
     youtube_title = yt_title(yt_link)
 
-    # TODO Get the Transcript of the video
     transcript = get_transcript(yt_link)
     if not transcript:
         return(JsonResponse({'error': 'Failed To Generate Transcript'}, status=500))        
 
-    # TODO: Generate the Blog Using OpenAI's Model 
     blog_content = generate_blog_from_transcript(transcript)
     if not blog_content:
         return(JsonResponse({'error': 'Failed To Generate Blog Article'}, status=500))
   
-    # TODO: Save the Blog to the Database
     new_blog_article = BlogPost.objects.create(
         user=request.user,
         youtube_title=youtube_title,
@@ -99,7 +96,6 @@ def generate_blog(request):
         )
     new_blog_article.save()
 
-    # TODO: Return the Blog to the User as a Response
     return(JsonResponse({'title': youtube_title, 'content': blog_content}))
 
 
