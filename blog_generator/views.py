@@ -1,3 +1,4 @@
+from urllib import response
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate, login, logout
 from django.shortcuts import render, redirect
@@ -9,12 +10,14 @@ from dotenv import load_dotenv
 from django.conf import settings
 from openai import OpenAI
 import google.generativeai as genai
+from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from .models import BlogPost
 import assemblyai
 import json
 import os
 import requests
 import logging
+import glob
 
 load_dotenv()
 
@@ -35,7 +38,14 @@ def yt_title(link):
     return (yt.title)
 
 
+def delete_audio_files():
+    mp3_files = glob.glob(os.path.join(settings.MEDIA_ROOT, '*.mp3'))
+    for file in mp3_files:
+        os.remove(file)
+
+
 def download_audio(link):
+    delete_audio_files()
     yt = YouTube(link)
     outfile = yt.streams.filter(only_audio=True).first().download(
         output_path=settings.MEDIA_ROOT)
@@ -46,28 +56,43 @@ def download_audio(link):
 
 
 def get_transcript(link):
-    # audio_file
     audio_file = download_audio(link)
-    assemblyai.settings.api_key = os.getenv('ASSEMBLYAI_API_KEY')
+    if os.getenv('ASSEMBLYAI_API_KEY'):
+        assemblyai.settings.api_key = os.getenv('ASSEMBLYAI_API_KEY')
 
-    transcriber = assemblyai.Transcriber()
-    transcript = transcriber.transcribe(audio_file)
-    os.remove(audio_file)
+        transcriber = assemblyai.Transcriber()
+        transcript = transcriber.transcribe(audio_file)
+        os.remove(audio_file)
 
-    return (transcript.text)
+        return (transcript.text)
+    else:
+        genai.configure(api_key=os.environ['GEMINI_API_KEY'])
+        uploaded_audio = genai.upload_file(audio_file)
+        model = genai.GenerativeModel(model_name="gemini-1.5-flash")
+        prompt = "Generate a transcript of the speech."
+        response = model.generate_content([prompt, uploaded_audio],
+                                          safety_settings={
+                                              HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+                                              HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+                                              HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+                                              HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+                                             
+        }
+        )
+        return response.candidates[0].content.parts[0]._raw_part.text
 
 
 def generate_blog_from_transcript(transcript):
     if os.getenv('OPENAI_API_KEY') and os.getenv('GEMINI_API_KEY'):
-        raise Exception("Both OpenAI and Gemini API Keys are set. Please use only one API Key")
-
+        raise Exception(
+            "Both OpenAI and Gemini API Keys are set. Please use only one API Key")
 
     elif os.getenv('OPENAI_API_KEY'):
         client = OpenAI(
             base_url="https://zukijourney.xyzbot.net/v1",
             api_key=os.getenv('OPENAI_API_KEY'),
         )
-        prompt = f"You are a highly skilled writer who has been tasked with writing a blog post based on the following transcript from a YouTube video. Write the blog post in a way that is engaging and informative. Make it look like a professional blog post. Don't disclose that you were fed a transcript. assume that you watched the video. The title of the blog is going to be the title of the video itself. So, Don't give the title of the article.  \n\n{
+        prompt = f"You are a highly skilled writer who has been tasked with writing a blog post based on the following transcript from a YouTube video. Write the blog post in a way that is engaging and informative. Make it look like a professional blog post. Don't disclose that you were fed a transcript. assume that you watched the video. The title of the blog is going to be the title of the video itself. So, Don't give the title of the article. Also give the resposne as plaintext with no markdown formatting or special characters.  \n\n{
             transcript} \n\nArticle:"
 
         response = client.chat.completions.create(
@@ -79,15 +104,19 @@ def generate_blog_from_transcript(transcript):
         generated_content = response.choices[0].message.content.strip()
         return (generated_content)
     elif os.getenv('GEMINI_API_KEY'):
-        prompt = f"You are a highly skilled writer who has been tasked with writing a blog post based on the following transcript from a YouTube video. Write the blog post in a way that is engaging and informative. Make it look like a professional blog post. Don't disclose that you were fed a transcript. assume that you watched the video. The title of the blog is going to be the title of the video itself. So, Don't give the title of the article.  \n\n{
+        prompt = f"You are a highly skilled writer who has been tasked with writing a blog post based on the following transcript from a YouTube video. Write the blog post in a way that is engaging and informative. Make it look like a professional blog post. Don't disclose that you were fed a transcript. assume that you watched the video. The title of the blog is going to be the title of the video itself. So, Don't give the title of the article.  Also give the resposne as plaintext with no markdown formatting or special characters.  \n\n{
             transcript}"
         genai.configure(api_key=os.environ["GEMINI_API_KEY"])
         model = genai.GenerativeModel("gemini-1.5-flash")
-        response = model.generate_content(prompt)
-        grenerated_content = response.text
-        return (grenerated_content)
-
-
+        response = model.generate_content(prompt,
+                                          safety_settings={
+                                              HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+                                              HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+                                              HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+                                              HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+                                          }
+                                          )
+        return response.candidates[0].content.parts[0]._raw_part.text
 
 
 @csrf_exempt
@@ -99,8 +128,8 @@ def generate_blog(request):
         except (KeyError, json.JSONDecodeError):
             return (JsonResponse({'error': 'Invalid Data Sent'}, status=400))
     else:
-        return(JsonResponse({'error': 'Invalid Request'}, status=405))
-    
+        return (JsonResponse({'error': 'Invalid Request'}, status=405))
+
     # TODO: Get The Title Of The Video
     youtube_title = yt_title(yt_link)
 
@@ -108,11 +137,11 @@ def generate_blog(request):
     if not transcript:
         return (JsonResponse({'error': 'Failed To Generate Transcript'}, status=500))
 
-    # TODO: Generate the Blog Using OpenAI's Model 
+    # TODO: Generate the Blog Using OpenAI's Model
     blog_content = generate_blog_from_transcript(transcript)
     if not blog_content:
-        return(JsonResponse({'error': 'Failed To Generate Blog Article'}, status=500))
-  
+        return (JsonResponse({'error': 'Failed To Generate Blog Article'}, status=500))
+
     # TODO: Save the Blog to the Database
     new_blog_article = BlogPost.objects.create(
         user=request.user,
@@ -123,10 +152,8 @@ def generate_blog(request):
     new_blog_article.save()
 
     # TODO: Return the Blog to the User as a Response
-    return(JsonResponse({'title': youtube_title, 'content': blog_content}))
+    return (JsonResponse({'title': youtube_title, 'content': blog_content}))
 
-
-        
 
 def user_login(request):
     if request.method == "POST":

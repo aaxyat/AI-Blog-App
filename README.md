@@ -16,6 +16,14 @@ These instructions will get you a copy of the project up and running on your loc
 - PostgreSQL
 - AssemblyAI API Key
 - OpenAI API Key
+- Google Gemini API Key
+
+#### Note: Using Google Gemini API
+
+
+If you are using Google Gemini API for audio transcription, you do not need to obtain an AssemblyAI API key. Google Gemini has built-in audio transcription capabilities that can be used instead. Make sure to configure the necessary environment variables for Google Gemini API in the `.env` file.
+
+
 
 ### Installation 🔧
 
